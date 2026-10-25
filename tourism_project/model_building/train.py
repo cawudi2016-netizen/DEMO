@@ -10,6 +10,9 @@ from sklearn.model_selection import GridSearchCV
 from sklearn.metrics import classification_report, accuracy_score, precision_score, recall_score, f1_score
 import xgboost as xgb
 
+# Configure MLflow sklearn serialization to avoid skops audit untrusted type failures
+os.environ["MLFLOW_SKLEARN_SERIALIZATION_FORMAT"] = "pickle"
+
 def train_model():
     if not (os.path.exists('Xtrain.csv') and os.path.exists('ytrain.csv')):
         raise FileNotFoundError("Preprocessed data splits not found.")
@@ -65,7 +68,9 @@ def train_model():
         os.makedirs("tourism_project/deployment", exist_ok=True)
         model_path = "tourism_project/deployment/model.joblib"
         joblib.dump(best_model, model_path)
-        mlflow.sklearn.log_model(best_model, "model")
+        
+        # Use classic pickle serialization to prevent skops security auditing issues in clean environments
+        mlflow.sklearn.log_model(best_model, "model", serialization_format="pickle")
 
         print(f"Best model saved successfully to {model_path}")
 
