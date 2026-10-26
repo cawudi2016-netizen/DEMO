@@ -1,78 +1,87 @@
-import os
 import pandas as pd
+from sklearn.compose import make_column_transformer
+from sklearn.pipeline import make_pipeline
+import xgboost as xgb
+from sklearn.model_selection import GridSearchCV
+from sklearn.metrics import classification_report
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 import joblib
 import mlflow
-import mlflow.sklearn
-from sklearn.compose import make_column_transformer
-from sklearn.preprocessing import StandardScaler, OneHotEncoder
-from sklearn.pipeline import make_pipeline
-from sklearn.model_selection import GridSearchCV
-from sklearn.metrics import classification_report, accuracy_score, precision_score, recall_score, f1_score
-import xgboost as xgb
 
-# Configure MLflow sklearn serialization to avoid skops audit untrusted type failures
-os.environ["MLFLOW_SKLEARN_SERIALIZATION_FORMAT"] = "pickle"
+mlflow.set_tracking_uri("http://127.0.0.1:5000")
+mlflow.set_experiment("tourism_package_experiment")
 
-def train_model():
-    if not (os.path.exists('Xtrain.csv') and os.path.exists('ytrain.csv')):
-        raise FileNotFoundError("Preprocessed data splits not found.")
+Xtrain = pd.read_csv("Xtrain.csv")
+Xtest = pd.read_csv("Xtest.csv")
+ytrain = pd.read_csv("ytrain.csv").squeeze()
+ytest = pd.read_csv("ytest.csv").squeeze()
 
-    X_train = pd.read_csv('Xtrain.csv')
-    y_train = pd.read_csv('ytrain.csv').values.ravel()
-    X_test = pd.read_csv('Xtest.csv')
-    y_test = pd.read_csv('ytest.csv').values.ravel()
+numeric_features = [
+    "Age", "CityTier", "DurationOfPitch", "NumberOfPersonVisiting",
+    "NumberOfFollowups", "PreferredPropertyStar", "NumberOfTrips",
+    "Passport", "PitchSatisfactionScore", "OwnCar",
+    "NumberOfChildrenVisiting", "MonthlyIncome"
+]
 
-    cat_cols = X_train.select_dtypes(include=['object']).columns.tolist()
-    num_cols = X_train.select_dtypes(exclude=['object']).columns.tolist()
+categorical_features = [
+    "TypeofContact", "Occupation", "Gender", "ProductPitched",
+    "MaritalStatus", "Designation"
+]
 
-    preprocessor = make_column_transformer(
-        (StandardScaler(), num_cols),
-        (OneHotEncoder(handle_unknown='ignore'), cat_cols)
-    )
+class_weight = ytrain.value_counts()[0] / ytrain.value_counts()[1]
 
-    classifier = xgb.XGBClassifier(random_state=42, use_label_encoder=False, eval_metric='logloss')
-    pipeline = make_pipeline(preprocessor, classifier)
+preprocessor = make_column_transformer(
+    (StandardScaler(), numeric_features),
+    (OneHotEncoder(handle_unknown='ignore'), categorical_features)
+)
+xgb_model = xgb.XGBClassifier(scale_pos_weight=class_weight, random_state=42)
 
-    param_grid = {
-        'xgbclassifier__n_estimators': [50, 100],
-        'xgbclassifier__max_depth': [3, 5, 7],
-        'xgbclassifier__learning_rate': [0.05, 0.1, 0.2]
-    }
+param_grid = {
+    'xgbclassifier__n_estimators': [50, 100],
+    'xgbclassifier__max_depth': [3, 5],
+    'xgbclassifier__colsample_bytree': [0.8, 1.0],
+    'xgbclassifier__colsample_bylevel': [0.8, 1.0],
+    'xgbclassifier__learning_rate': [0.05, 0.1],
+    'xgbclassifier__reg_lambda': [1.0, 5.0]
+}
+model_pipeline = make_pipeline(preprocessor, xgb_model)
 
-    mlflow.set_experiment("Tourism_Package_Prediction")
-    with mlflow.start_run():
-        print("--- Starting Hyperparameter Tuning ---")
-        grid_search = GridSearchCV(pipeline, param_grid, cv=3, scoring='f1', n_jobs=-1)
-        grid_search.fit(X_train, y_train)
+with mlflow.start_run():
+    grid_search = GridSearchCV(model_pipeline, param_grid, cv=5, n_jobs=-1)
+    grid_search.fit(Xtrain, ytrain)
 
-        best_model = grid_search.best_estimator_
-        best_params = grid_search.best_params_
+    results = grid_search.cv_results_
+    for i in range(len(results["params"])):
+        with mlflow.start_run(nested=True):
+            mlflow.log_params(results["params"][i])
+            mlflow.log_metric("mean_test_score", results["mean_test_score"][i])
+            mlflow.log_metric("std_test_score", results["std_test_score"][i])
 
-        predictions = best_model.predict(X_test)
-        accuracy = accuracy_score(y_test, predictions)
-        precision = precision_score(y_test, predictions, zero_division=0)
-        recall = recall_score(y_test, predictions, zero_division=0)
-        f1 = f1_score(y_test, predictions, zero_division=0)
+    mlflow.log_params(grid_search.best_params_)
+    best_model = grid_search.best_estimator_
+    classification_threshold = 0.45
 
-        print("\n--- Evaluation Metrics ---")
-        print(classification_report(y_test, predictions))
+    y_pred_train_proba = best_model.predict_proba(Xtrain)[:, 1]
+    y_pred_train = (y_pred_train_proba >= classification_threshold).astype(int)
 
-        for param_name, param_value in best_params.items():
-            mlflow.log_param(param_name, param_value)
+    y_pred_test_proba = best_model.predict_proba(Xtest)[:, 1]
+    y_pred_test = (y_pred_test_proba >= classification_threshold).astype(int)
 
-        mlflow.log_metric("accuracy", accuracy)
-        mlflow.log_metric("precision", precision)
-        mlflow.log_metric("recall", recall)
-        mlflow.log_metric("f1_score", f1)
+    train_report = classification_report(ytrain, y_pred_train, output_dict=True)
+    test_report = classification_report(ytest, y_pred_test, output_dict=True)
 
-        os.makedirs("tourism_project/deployment", exist_ok=True)
-        model_path = "tourism_project/deployment/model.joblib"
-        joblib.dump(best_model, model_path)
-        
-        # Use classic pickle serialization to prevent skops security auditing issues in clean environments
-        mlflow.sklearn.log_model(best_model, "model", serialization_format="pickle")
+    mlflow.log_metrics({
+        "train_accuracy": train_report["accuracy"],
+        "train_precision": train_report["1"]["precision"],
+        "train_recall": train_report["1"]["recall"],
+        "train_f1-score": train_report["1"]["f1-score"],
+        "test_accuracy": test_report["accuracy"],
+        "test_precision": test_report["1"]["precision"],
+        "test_recall": test_report["1"]["recall"],
+        "test_f1-score": test_report["1"]["f1-score"]
+    })
 
-        print(f"Best model saved successfully to {model_path}")
-
-if __name__ == '__main__':
-    train_model()
+    model_path = "tourism_project/deployment/best_tourism_package_model_v1.joblib"
+    joblib.dump(best_model, model_path)
+    mlflow.log_artifact(model_path, artifact_path="model")
+    print(f"Model saved to {model_path}")
