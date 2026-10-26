@@ -10,7 +10,6 @@ permissions:
   contents: write
 
 jobs:
-
   register-dataset:
     runs-on: ubuntu-latest
     steps:
@@ -19,9 +18,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install Dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pandas
+        run: pip install -r tourism_project/requirements.txt
       - name: Register Dataset
         run: python tourism_project/model_building/data_register.py
       - name: Upload Registered Dataset
@@ -39,9 +36,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install Dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pandas scikit-learn
+        run: pip install -r tourism_project/requirements.txt
       - name: Run Data Preparation
         run: python tourism_project/model_building/prep.py
       - name: Upload Train Test Splits
@@ -54,7 +49,7 @@ jobs:
             ytrain.csv
             ytest.csv
 
-  model-training:
+  model-traning:
     needs: data-prep
     runs-on: ubuntu-latest
     steps:
@@ -63,9 +58,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install Dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pandas scikit-learn xgboost mlflow joblib
+        run: pip install -r tourism_project/requirements.txt
       - name: Download Train Test Splits
         uses: actions/download-artifact@v4
         with:
@@ -80,6 +73,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add tourism_project/deployment/model.joblib
+          git add tourism_project/deployment/*.joblib
           git commit -m "Add trained model [skip ci]" || echo "No changes to commit"
           git push
