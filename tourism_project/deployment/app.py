@@ -2,6 +2,7 @@ import os
 import streamlit as st
 import pandas as pd
 import joblib
+import plotly.graph_objects as go
 
 model_path = os.path.join(os.path.dirname(__file__), "best_tourism_package_model_v1.joblib")
 model = joblib.load(model_path)
@@ -52,7 +53,39 @@ input_data = pd.DataFrame([{
 classification_threshold = 0.45
 
 if st.button("Predict"):
-    prob = model.predict_proba(input_data)[0, 1]
+    probabilities = model.predict_proba(input_data)[0]
+    prob = probabilities[1]
     pred = int(prob >= classification_threshold)
     result = "will purchase the travel package" if pred == 1 else "is unlikely to purchase"
-    st.write(f"Prediction: Customer {result}")
+    
+    st.markdown(f"### Prediction: Customer **{result}**")
+    st.markdown(f"Probability Score: **{prob*100:.2f}%**")
+    
+    # Plotly interactive chart rendering inside Streamlit
+    classes = ['Will NOT Purchase (0)', 'Will Purchase (1)']
+    colors = ['#EF553B', '#636EFA'] 
+    
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=classes,
+        y=probabilities,
+        marker_color=colors,
+        text=[f"{p*100:.2f}%" for p in probabilities],
+        textposition='auto',
+        hoverinfo='text'
+    ))
+    
+    fig.add_shape(type="line",
+        xref="paper", yref="y",
+        x0=0, y0=classification_threshold, x1=1, y1=classification_threshold,
+        line=dict(color="Green", width=3, dash="dash"),
+    )
+    
+    fig.update_layout(
+        title="Customer Purchase Probability Distribution",
+        yaxis=dict(title="Probability Score", range=[0, 1]),
+        xaxis=dict(title="Target Outcomes"),
+        template="plotly_white"
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
