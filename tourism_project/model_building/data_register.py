@@ -1,16 +1,24 @@
-import os
 import pandas as pd
 
-def register_data():
-    data_path = 'tourism_project/data/tourism.csv'
-    if not os.path.exists(data_path):
-        raise FileNotFoundError(f'Dataset not found at {data_path}')
+RAW_PATH = "/content/tourism.csv"
 
-    df = pd.read_csv(data_path)
-    print('--- Dataset Registered Successfully ---')
-    print(f'Dataset Shape: {df.shape}')
-    print('\nColumns and Missing Values:')
-    print(df.isnull().sum())
+# Load the raw dataset
+df = pd.read_csv(RAW_PATH)
 
-if __name__ == '__main__':
-    register_data()
+# Validate that the expected columns are present before registering it
+expected_columns = [
+    "CustomerID", "ProdTaken", "Age", "TypeofContact", "CityTier",
+    "DurationOfPitch", "Occupation", "Gender", "NumberOfPersonVisiting",
+    "NumberOfFollowups", "ProductPitched", "PreferredPropertyStar",
+    "MaritalStatus", "NumberOfTrips", "Passport", "PitchSatisfactionScore",
+    "OwnCar", "NumberOfChildrenVisiting", "Designation", "MonthlyIncome",
+]
+missing = [c for c in expected_columns if c not in df.columns]
+if missing:
+    raise ValueError(f"Dataset is missing expected columns: {missing}")
+
+print("Dataset registered successfully.")
+print(f"Rows: {df.shape[0]}, Columns: {df.shape[1]}")
+print("Columns:", list(df.columns))
+print("ProdTaken distribution:")
+print(df["ProdTaken"].value_counts())
